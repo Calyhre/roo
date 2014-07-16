@@ -89,6 +89,7 @@ class Roo::Excelx < Roo::Base
       extract_content(tmpdir, @filename)
       @workbook_doc = load_xml(File.join(tmpdir, "roo_workbook.xml"))
       @shared_table = []
+      @html_shared_table = []
       if File.exist?(File.join(tmpdir, 'roo_sharedStrings.xml'))
         @sharedstring_doc = load_xml(File.join(tmpdir, 'roo_sharedStrings.xml'))
         read_shared_strings(@sharedstring_doc)
@@ -146,6 +147,24 @@ class Roo::Excelx < Roo::Base
       return DateTime.civil(yyyy.to_i,mm.to_i,dd.to_i,hh.to_i,mi.to_i,ss.to_i)
     end
     @cell[sheet][[row,col]]
+  end
+
+  # Returns the html content of a spreadsheet-cell.
+  # (1,1) is the upper left corner.
+  # (1,1), (1,'A'), ('A',1), ('a',1) all refers to the
+  # cell at the first line and first row.
+  def html_cell(row, col, sheet=nil)
+    sheet ||= @default_sheet
+    read_cells(sheet)
+    row,col = normalize(row,col)
+    if celltype(row,col,sheet) == :date
+      yyyy,mm,dd = @cell[sheet][[row,col]].split('-')
+      Date.new(yyyy.to_i,mm.to_i,dd.to_i)
+    elsif celltype(row,col,sheet) == :datetime
+      create_datetime_from( @cell[sheet][[row,col]] )
+    else
+      @html_cell[sheet][[row,col]]
+    end
   end
 
   # Returns the formula at (row,col).
@@ -348,7 +367,7 @@ class Roo::Excelx < Roo::Base
   end
 
   # helper function to set the internal representation of cells
-  def set_cell_values(sheet,x,y,i,v,value_type,formula,
+  def set_cell_values(sheet,x,y,i,v,html,value_type,formula,
       excelx_type=nil,
       excelx_value=nil,
       s_attribute=nil)
@@ -358,6 +377,7 @@ class Roo::Excelx < Roo::Base
     @formula[sheet] ||= {}
     @formula[sheet][key] = formula  if formula
     @cell[sheet] ||= {}
+    @html_cell[sheet] ||= {}
     @cell[sheet][key] =
       case @cell_type[sheet][key]
       when :float
@@ -375,6 +395,8 @@ class Roo::Excelx < Roo::Base
       else
         v
       end
+
+    @html_cell[sheet][key] = html
 
     @cell[sheet][key] = Spreadsheet::Link.new(@hyperlink[sheet][key], @cell[sheet][key].to_s) if hyperlink?(y,x+i)
     @excelx_type[sheet] ||= {}
@@ -442,31 +464,33 @@ class Roo::Excelx < Roo::Base
           end
           excelx_type = [:numeric_or_formula,format.to_s]
           excelx_value = cell.content
-          v =
-            case value_type
-            when :shared
-              value_type = :string
-              excelx_type = :string
-              @shared_table[cell.content.to_i]
-            when :boolean
-              (cell.content.to_i == 1 ? 'TRUE' : 'FALSE')
-            when :date
-              cell.content
-            when :time
-              cell.content
-            when :datetime
-              cell.content
-            when :formula
-              cell.content.to_f #TODO: !!!!
-            when :string
-              excelx_type = :string
-              cell.content
-            else
-              value_type = :float
-              cell.content
-            end
-          y, x = Roo::Base.split_coordinate(c['r'])
-          set_cell_values(sheet,x,y,0,v,value_type,formula,excelx_type,excelx_value,s_attribute)
+
+          case value_type
+          when :shared
+            value_type = :string
+            excelx_type = :string
+            v = @shared_table[cell.content.to_i]
+            html = @html_shared_table[cell.content.to_i]
+          when :boolean
+            html = v = (cell.content.to_i == 1 ? 'TRUE' : 'FALSE')
+          when :date
+            html = v = cell.content
+          when :time
+            html = v = cell.content
+          when :datetime
+            html = v = cell.content
+          when :formula
+            html = v = cell.content.to_f #TODO: !!!!
+          when :string
+            excelx_type = :string
+            html = v = cell.content
+          else
+            value_type = :float
+            html = v = cell.content
+          end
+
+          y, x = self.class.split_coordinate(c['r'])
+          set_cell_values(sheet,x,y,0,v,html,value_type,formula,excelx_type,excelx_value,s_attribute)
         end
       end
     end
@@ -609,18 +633,28 @@ Datei xl/comments1.xml
   def read_shared_strings(doc)
     doc.xpath("/xmlns:sst/xmlns:si").each do |si|
       shared_table_entry = ''
+      html_shared_table_entry = ''
       si.children.each do |elem|
         if elem.name == 'r' and elem.children
           elem.children.each do |r_elem|
             if r_elem.name == 't'
               shared_table_entry << r_elem.content
+              content = r_elem.content
+
+              content = "<u>#{content}</u>" if elem.xpath('./xmlns:rPr/xmlns:u').any?
+              content = "<i>#{content}</i>" if elem.xpath('./xmlns:rPr/xmlns:i').any?
+              content = "<b>#{content}</b>" if elem.xpath('./xmlns:rPr/xmlns:b').any?
+
+              html_shared_table_entry << content
             end
           end
         end
         if elem.name == 't'
           shared_table_entry = elem.content
+          html_shared_table_entry = elem.content
         end
       end
+      @html_shared_table << html_shared_table_entry
       @shared_table << shared_table_entry
     end
   end

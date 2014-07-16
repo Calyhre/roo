@@ -50,6 +50,7 @@ class Roo::Base
     @options = options
 
     @cell = {}
+    @html_cell = {}
     @cell_type = {}
     @cells_read = {}
 
